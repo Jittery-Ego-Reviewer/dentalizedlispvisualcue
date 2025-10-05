@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.7.77/Tone.js"></script>
+    <style>
+        /* Custom styles for the range slider thumb */
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 40px;
+            height: 40px;
+            background: #4ade80; /* green-400 */
+            cursor: pointer;
+            border-radius: 50%;
+            border: 4px solid white;
+            box-shadow: 0 0 10px rgba(0,0,0,0.2);
+            margin-top: -14px; /* Center thumb on the track */
+        }
+
+        input[type="range"]::-moz-range-thumb {
+            width: 40px;
+            height: 40px;
+            background: #4ade80;
+            cursor: pointer;
+            border-radius: 50%;
+            border: 4px solid white;
+            box-shadow: 0 0 10px rgba(0,0,0,0.2);
+        }
+
+        /* Custom styles for the range slider track */
+        input[type="range"]::-webkit-slider-runnable-track {
+            width: 100%;
+            height: 12px;
+            cursor: pointer;
+            background: #bbf7d0; /* green-200 */
+            border-radius: 9999px;
+            border: 2px solid #f0fdf4; /* green-50 */
+        }
+
+        input[type="range"]::-moz-range-track {
+            width: 100%;
+            height: 12px;
+            cursor: pointer;
+            background: #bbf7d0;
+            border-radius: 9999px;
+            border: 2px solid #f0fdf4;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            overscroll-behavior: none;
+        }
+    </style>
+</head>
+<body class="bg-lime-100 h-screen w-screen overflow-hidden flex flex-col justify-center items-center p-4">
+
+    <!-- This container will hold the snake animation -->
+    <div id="game-container" class="w-full h-full flex-grow relative rounded-2xl bg-sky-200 shadow-inner overflow-hidden">
+        <!-- The snake will be drawn here using JavaScript -->
+    </div>
+
+    <!-- The interactive slider bar -->
+    <div class="w-full max-w-lg p-4 mt-6">
+        <input type="range" id="hiss-slider" min="0" max="100" value="0" class="w-full h-3 bg-lime-200 rounded-lg appearance-none cursor-pointer">
+    </div>
+
+    <script>
+        const gameContainer = document.getElementById('game-container');
+        const slider = document.getElementById('hiss-slider');
+
+        // --- Sound Synthesis Setup (Tone.js) ---
+        let noise, filter, gain, isSoundReady = false;
+
+        // Initialize audio components after a user interaction
+        function setupAudio() {
+            if (isSoundReady) return;
+            isSoundReady = true;
+            Tone.start();
+            
+            // A hissing sound is essentially filtered white noise
+            noise = new Tone.Noise("white").start();
+            
+            // Gain node to control the volume, initialized to 0 (silent)
+            gain = new Tone.Gain(0).toDestination();
+
+            // AutoFilter to create the "shhh" effect of a hiss
+            filter = new Tone.AutoFilter({
+                frequency: "8n",
+                baseFrequency: 800, // This is now the constant tone of the hiss
+                octaves: 3
+            }).connect(gain); 
+
+            noise.connect(filter);
+            filter.start(); 
+            
+            console.log("Audio ready.");
+        }
+
+        // --- Snake Animation Setup ---
+        const snake = {
+            segments: [],
+            numSegments: 15,
+            segmentSize: 15, 
+            spacing: 20,
+            color: '#22c55e', 
+            eyeColor: '#1f2937', 
+            speed: 0,
+            angle: 0,
+            turnSpeed: 0.05,
+            x: gameContainer.clientWidth / 2,
+            y: gameContainer.clientHeight / 2,
+        };
+
+        // Create the snake's body parts (SVG circles)
+        function createSnake() {
+            for (let i = 0; i < snake.numSegments; i++) {
+                const segment = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                segment.setAttribute('r', snake.segmentSize * (1 - i / (snake.numSegments * 1.5))); // Taper the tail
+                segment.setAttribute('fill', snake.color);
+                
+                if (i === 0) {
+                    segment.setAttribute('r', snake.segmentSize * 1.2); 
+                    const eye1 = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                    const eye2 = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                    eye1.setAttribute('r', '3');
+                    eye2.setAttribute('r', '3');
+                    eye1.setAttribute('fill', snake.eyeColor);
+                    eye2.setAttribute('fill', snake.eyeColor);
+                    snake.segments.push({ el: segment, x: snake.x, y: snake.y, eyes: [eye1, eye2] });
+                } else {
+                    snake.segments.push({ el: segment, x: snake.x - i * snake.spacing, y: snake.y });
+                }
+            }
+            
+            const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            svg.setAttribute('width', '100%');
+            svg.setAttribute('height', '100%');
+            svg.style.position = 'absolute';
+            gameContainer.appendChild(svg);
+            
+            snake.segments.slice().reverse().forEach(seg => {
+                svg.appendChild(seg.el);
+                if (seg.eyes) {
+                    svg.appendChild(seg.eyes[0]);
+                    svg.appendChild(seg.eyes[1]);
+                }
+            });
+        }
+        
+        // --- Animation Loop ---
+        let lastTime = 0;
+        function animate(timestamp) {
+            const deltaTime = timestamp - lastTime;
+            lastTime = timestamp;
+
+            snake.speed = parseFloat(slider.value) / 20;
+
+            if (snake.speed > 0) {
+                snake.angle += (Math.random() - 0.5) * snake.turnSpeed;
+                const head = snake.segments[0];
+                head.x += Math.cos(snake.angle) * snake.speed * (deltaTime / 16);
+                head.y += Math.sin(snake.angle) * snake.speed * (deltaTime / 16);
+
+                const bounds = gameContainer.getBoundingClientRect();
+                if (head.x < snake.segmentSize || head.x > bounds.width - snake.segmentSize) {
+                    snake.angle = Math.PI - snake.angle;
+                    head.x = Math.max(snake.segmentSize, Math.min(head.x, bounds.width - snake.segmentSize));
+                }
+                if (head.y < snake.segmentSize || head.y > bounds.height - snake.segmentSize) {
+                    snake.angle = -snake.angle;
+                    head.y = Math.max(snake.segmentSize, Math.min(head.y, bounds.height - snake.segmentSize));
+                }
+
+                for (let i = 1; i < snake.numSegments; i++) {
+                    const current = snake.segments[i];
+                    const leader = snake.segments[i - 1];
+                    const dx = leader.x - current.x;
+                    const dy = leader.y - current.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+                    
+                    if (distance > snake.spacing) {
+                        const moveX = dx * (distance - snake.spacing) / distance;
+                        const moveY = dy * (distance - snake.spacing) / distance;
+                        current.x += moveX;
+                        current.y += moveY;
+                    }
+                }
+            }
+            
+            snake.segments.forEach((seg, i) => {
+                seg.el.setAttribute('cx', seg.x);
+                seg.el.setAttribute('cy', seg.y);
+
+                if (seg.eyes) {
+                    const eyeOffset = snake.segmentSize * 0.4;
+                    const eyeAngle1 = snake.angle - Math.PI / 4;
+                    const eyeAngle2 = snake.angle + Math.PI / 4;
+                    seg.eyes[0].setAttribute('cx', seg.x + Math.cos(eyeAngle1) * eyeOffset);
+                    seg.eyes[0].setAttribute('cy', seg.y + Math.sin(eyeAngle1) * eyeOffset);
+                    seg.eyes[1].setAttribute('cx', seg.x + Math.cos(eyeAngle2) * eyeOffset);
+                    seg.eyes[1].setAttribute('cy', seg.y + Math.sin(eyeAngle2) * eyeOffset);
+                }
+            });
+
+            requestAnimationFrame(animate);
+        }
+
+        // --- Event Listeners ---
+        function handleSliderInput() {
+            if (!isSoundReady) setupAudio();
+
+            const value = parseFloat(slider.value);
+            if (value > 0) {
+                gain.gain.rampTo(0.3, 0.1); 
+                
+                // --- CHANGED ---
+                // The two lines that modulated the sound based on slider value have been removed.
+                // The sound will now stay at the constant tone set in the setupAudio() function.
+                
+            } else {
+                gain.gain.rampTo(0, 0.2);
+            }
+        }
+        
+        function handleSliderRelease() {
+            slider.value = 0;
+            handleSliderInput(); 
+        }
+
+        slider.addEventListener('input', handleSliderInput);
+        
+        document.addEventListener('mouseup', handleSliderRelease);
+        document.addEventListener('touchend', handleSliderRelease);
+
+        // --- Initialization ---
+        createSnake();
+        requestAnimationFrame(animate);
+    </script>
+
+</body>
+</html>
+
